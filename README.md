@@ -1,36 +1,134 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# World Sim
 
-## Getting Started
+국가 대항 시뮬레이션 게임 (비동기 시즌제)
 
-First, run the development server:
+## 기술 스택
+
+- **Framework**: Next.js 16 (App Router)
+- **Database**: PostgreSQL + Prisma 7
+- **Auth**: NextAuth.js (Google OAuth)
+- **Cache**: Redis (선택)
+- **Styling**: Tailwind CSS
+- **State**: Zustand
+
+## 시작하기
+
+### 1. 의존성 설치
+
+```bash
+npm install
+```
+
+### 2. 환경 변수 설정
+
+`.env` 파일을 생성하고 다음 변수를 설정:
+
+```env
+# Database (PostgreSQL)
+DATABASE_URL="postgresql://user:password@localhost:5432/worldsim?schema=public"
+
+# Auth
+NEXTAUTH_SECRET="your-secret-key"
+NEXTAUTH_URL="http://localhost:3000"
+
+# Google OAuth (선택)
+GOOGLE_CLIENT_ID="your-client-id"
+GOOGLE_CLIENT_SECRET="your-client-secret"
+
+# Redis (선택)
+REDIS_URL="redis://localhost:6379"
+```
+
+### 3. 데이터베이스 설정
+
+**옵션 A: Homebrew PostgreSQL (macOS)**
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+createdb worldsim
+```
+
+**옵션 B: Docker**
+```bash
+docker run -d --name worldsim-db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=worldsim \
+  -p 5432:5432 \
+  postgres:16
+```
+
+**옵션 C: Neon (서버리스)**
+1. https://neon.tech 에서 프로젝트 생성
+2. Connection string을 `DATABASE_URL`에 설정
+
+### 4. 마이그레이션 및 시드
+
+```bash
+# 마이그레이션 실행
+npx prisma migrate dev --name init
+
+# 시드 데이터 생성
+npx prisma db seed
+
+# Prisma Client 생성
+npx prisma generate
+```
+
+### 5. 개발 서버 실행
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 에서 앱 확인
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 주요 명령어
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run dev          # 개발 서버
+npm run build        # 프로덕션 빌드
+npm run start        # 프로덕션 서버
+npm run lint         # 린트 검사
+npm run lint:fix     # 린트 자동 수정
 
-## Learn More
+# Database
+npx prisma migrate dev    # 마이그레이션
+npx prisma db seed        # 시드 데이터
+npx prisma studio         # DB GUI
+npx prisma generate       # 클라이언트 생성
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 프로젝트 구조
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+src/
+├── app/                 # Next.js App Router
+│   ├── (auth)/          # 인증 페이지
+│   ├── (main)/          # 메인 페이지
+│   └── api/             # API Routes
+├── components/          # React 컴포넌트
+├── game/
+│   └── engine/          # 게임 엔진 (정산, 이벤트)
+├── lib/                 # 유틸리티
+│   ├── auth/            # NextAuth 설정
+│   ├── cache/           # Redis 클라이언트
+│   └── db/              # Prisma 클라이언트
+├── stores/              # Zustand 스토어
+└── types/               # TypeScript 타입
+prisma/
+├── schema.prisma        # DB 스키마
+└── seed.ts              # 시드 데이터
+docs/
+├── GDD.md               # 게임 디자인 문서
+├── ERD.md               # 데이터 모델
+├── ARCHITECTURE.md      # 기술 아키텍처
+└── WBS.md               # 개발 일정
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 문서
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [게임 디자인 문서 (GDD)](docs/GDD.md)
+- [데이터 모델 (ERD)](docs/ERD.md)
+- [기술 아키텍처](docs/ARCHITECTURE.md)
+- [개발 일정 (WBS)](docs/WBS.md)
