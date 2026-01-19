@@ -5,6 +5,15 @@ import { redis } from '@/lib/cache/redis';
 const LEADERBOARD_CACHE_KEY = 'leaderboard:season:';
 const CACHE_TTL = 300; // 5 minutes
 
+function parseIntSafe(value: string | null, fallback: number): number {
+  const n = value ? Number.parseInt(value, 10) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 interface LeaderboardEntry {
   rank: number;
   userId: string;
@@ -18,20 +27,14 @@ interface LeaderboardEntry {
   status: string;
 }
 
-interface UserSelect {
-  id: string;
-  nickname: string | null;
-  avatarUrl: string | null;
-}
-
 // GET /api/leaderboard - Get leaderboard
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const seasonId = searchParams.get('seasonId');
     const type = searchParams.get('type') || 'SEASON'; // DAILY, WEEKLY, SEASON
-    const limit = parseInt(searchParams.get('limit') || '100');
-    const page = parseInt(searchParams.get('page') || '1');
+    const limit = clampInt(parseIntSafe(searchParams.get('limit'), 100), 1, 100);
+    const page = clampInt(parseIntSafe(searchParams.get('page'), 1), 1, 10000);
 
     // Get active season if not specified
     let targetSeasonId = seasonId;
@@ -46,16 +49,19 @@ export async function GET(request: NextRequest) {
       targetSeasonId = activeSeason.id;
     }
 
-    const cacheKey = `${LEADERBOARD_CACHE_KEY}${targetSeasonId}:${type}:${page}`;
+    // Include limit in cache key to prevent cache pollution
+    const cacheKey = `${LEADERBOARD_CACHE_KEY}${targetSeasonId}:${type}:${page}:${limit}`;
 
-    // Try to get from cache
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        return NextResponse.json(JSON.parse(cached));
+    // Try to get from cache (only if Redis is available)
+    if (redis) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          return NextResponse.json(JSON.parse(cached));
+        }
+      } catch {
+        // Cache miss or error, continue to fetch from DB
       }
-    } catch {
-      // Cache miss or error, continue to fetch from DB
     }
 
     // Build date filter for type
@@ -135,11 +141,13 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    // Cache the result
-    try {
-      await redis.set(cacheKey, JSON.stringify(response), 'EX', CACHE_TTL);
-    } catch {
-      // Cache error, continue without caching
+    // Cache the result (only if Redis is available)
+    if (redis) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(response), 'EX', CACHE_TTL);
+      } catch {
+        // Cache error, continue without caching
+      }
     }
 
     return NextResponse.json(response);

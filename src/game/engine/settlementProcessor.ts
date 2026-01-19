@@ -4,8 +4,17 @@ import { acquireLock, releaseLock } from '@/lib/cache/redis';
 import { NationStats, Budget, ScoreWeights, DEFAULT_SCORE_WEIGHTS, PolicyEffect, PolicyCondition } from '@/types/game';
 import { calculateNewStats } from './statsCalculator';
 import { calculateFinalScore, checkGameOverConditions } from './scoreCalculator';
+import { processSessionEvents } from './eventProcessor';
 
 const SETTLEMENT_LOCK_PREFIX = 'settlement:session:';
+
+const DEFAULT_BUDGET: Budget = {
+  economy: 20,
+  welfare: 20,
+  research: 20,
+  military: 20,
+  diplomacy: 20,
+};
 
 interface SettlementResult {
   success: boolean;
@@ -100,13 +109,7 @@ export async function processSessionSettlement(
 
     // Get turn decision (use default if not submitted)
     const turnDecision = turnDecisions[0];
-    const budget: Budget = (turnDecision?.budget as unknown as Budget) || {
-      economy: 20,
-      welfare: 20,
-      research: 20,
-      military: 20,
-      diplomacy: 20,
-    };
+    const budget: Budget = (turnDecision?.budget as unknown as Budget) || { ...DEFAULT_BUDGET };
     const activePolicyIds = (turnDecision?.activePolicies as unknown as string[]) || [];
 
     // Get policy cards
@@ -123,30 +126,57 @@ export async function processSessionSettlement(
       conditions: card.conditions as unknown as PolicyCondition[] | undefined,
     }));
 
-    // Calculate new stats
+    // Calculate new stats (budget + policy + natural)
     const currentStats = session.currentStats as unknown as NationStats;
-    const { newStats } = calculateNewStats(currentStats, budget, policyCardData);
+    const { newStats: baseStats } = calculateNewStats(currentStats, budget, policyCardData);
 
-    // Check game over conditions
-    const gameOverCheck = checkGameOverConditions(newStats);
-
-    // Calculate score
-    const { newScore, scoreChange, bonusScore } = calculateFinalScore(
-      newStats,
-      currentStats,
-      session.totalScore,
-      session.currentTurn,
-      scoreWeights
-    );
+    let finalStats: NationStats = baseStats;
+    let scoreChange = 0;
+    let newScore = session.totalScore;
+    let gameOverCheck: { isGameOver: boolean; reason?: string } = { isGameOver: false };
 
     // Create snapshot and update session in transaction
     await prisma.$transaction(async (tx) => {
-      // Create turn snapshot
-      await tx.turnSnapshot.create({
+      // Create turn snapshot first (to get snapshotId for event instances)
+      const snapshot = await tx.turnSnapshot.create({
         data: {
           sessionId,
           turnNumber: session.currentTurn,
-          statsSnapshot: newStats as unknown as Prisma.InputJsonValue,
+          statsSnapshot: baseStats as unknown as Prisma.InputJsonValue,
+          scoreChange: 0,
+          totalScore: session.totalScore,
+        },
+      });
+
+      // Process events (trigger new events, apply effects, update durations)
+      const eventResult = await processSessionEvents(
+        sessionId,
+        snapshot.id,
+        baseStats,
+        session.currentTurn,
+        tx as unknown as Parameters<typeof processSessionEvents>[4]
+      );
+      finalStats = eventResult.newStats;
+
+      // Check game over conditions after event effects
+      gameOverCheck = checkGameOverConditions(finalStats);
+
+      // Calculate score with final stats
+      const scoreResult = calculateFinalScore(
+        finalStats,
+        currentStats,
+        session.totalScore,
+        session.currentTurn,
+        scoreWeights
+      );
+      newScore = scoreResult.newScore;
+      scoreChange = scoreResult.scoreChange;
+
+      // Update snapshot with final values
+      await tx.turnSnapshot.update({
+        where: { id: snapshot.id },
+        data: {
+          statsSnapshot: finalStats as unknown as Prisma.InputJsonValue,
           scoreChange,
           totalScore: newScore,
         },
@@ -156,7 +186,7 @@ export async function processSessionSettlement(
       await tx.gameSession.update({
         where: { id: sessionId },
         data: {
-          currentStats: newStats as unknown as Prisma.InputJsonValue,
+          currentStats: finalStats as unknown as Prisma.InputJsonValue,
           currentTurn: session.currentTurn + 1,
           totalScore: newScore,
           status: gameOverCheck.isGameOver ? 'COMPLETED' : 'ACTIVE',
@@ -169,7 +199,7 @@ export async function processSessionSettlement(
       sessionId,
       turnNumber: session.currentTurn,
       previousStats: currentStats,
-      newStats,
+      newStats: finalStats,
       scoreChange,
       totalScore: newScore,
       isGameOver: gameOverCheck.isGameOver,

@@ -16,45 +16,43 @@ export function calculateBudgetEffects(
 ): Partial<NationStats> {
   const effects: Partial<NationStats> = {};
 
+  // Budget baseline: 20% is neutral, above/below shifts positive/negative
+  const factor = (budgetPercent: number, baseline = 20) => (budgetPercent - baseline) / 100;
+
   // Economy budget affects GDP and industry
   if (budget.economy > 0) {
-    const economyFactor = (budget.economy - 20) / 100; // -0.2 to 0.8
+    const economyFactor = factor(budget.economy); // -0.2 to 0.8 when 0..100
     effects.gdp = Math.round(stats.gdp * 0.05 * economyFactor);
     effects.industry = Math.round(3 * economyFactor);
   }
 
   // Welfare budget affects happiness and population
   if (budget.welfare > 0) {
-    const welfareFactor = (budget.welfare - 20) / 100;
+    const welfareFactor = factor(budget.welfare);
     effects.happiness = Math.round(5 * welfareFactor);
     effects.population = Math.round(2 * welfareFactor);
   }
 
   // Research budget affects tech and research
   if (budget.research > 0) {
-    const researchFactor = (budget.research - 20) / 100;
-    effects.techLevel = Math.round(3 * welfareFactor(researchFactor));
+    const researchFactor = factor(budget.research);
+    effects.techLevel = Math.round(3 * researchFactor);
     effects.research = Math.round(5 * researchFactor);
   }
 
   // Military budget affects military power
   if (budget.military > 0) {
-    const militaryFactor = (budget.military - 20) / 100;
+    const militaryFactor = factor(budget.military);
     effects.military = Math.round(5 * militaryFactor);
   }
 
   // Diplomacy budget affects diplomacy
   if (budget.diplomacy > 0) {
-    const diplomacyFactor = (budget.diplomacy - 20) / 100;
+    const diplomacyFactor = factor(budget.diplomacy);
     effects.diplomacy = Math.round(5 * diplomacyFactor);
   }
 
   return effects;
-}
-
-// Helper function for research factor calculation
-function welfareFactor(factor: number): number {
-  return factor;
 }
 
 /**

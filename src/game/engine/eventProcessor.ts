@@ -1,7 +1,23 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@/lib/db/prisma';
 import { NationStats, EventTrigger, EventEffect, EventCategory } from '@/types/game';
-import { applyEffects, applyStatBounds } from './statsCalculator';
+import { applyStatBounds } from './statsCalculator';
+
+// Minimal DB client surface (supports PrismaClient and Prisma.TransactionClient)
+export interface EventDbClient {
+  eventDefinition: {
+    findMany: (args: unknown) => Promise<unknown[]>;
+  };
+  eventInstance: {
+    findMany: (args: unknown) => Promise<unknown[]>;
+    create: (args: unknown) => Promise<unknown>;
+    updateMany: (args: unknown) => Promise<unknown>;
+  };
+}
+
+function getDb(client?: EventDbClient): EventDbClient {
+  return client ?? (prisma as unknown as EventDbClient);
+}
 
 interface EventDefinitionData {
   id: string;
@@ -95,21 +111,31 @@ function checkEventTriggers(
 export async function findTriggeredEvents(
   sessionId: string,
   stats: NationStats,
-  turn: number
+  turn: number,
+  client?: EventDbClient
 ): Promise<TriggeredEvent[]> {
+  const db = getDb(client);
+
   // Get all active event definitions
-  const eventDefinitions = await prisma.eventDefinition.findMany({
+  const eventDefinitions = (await db.eventDefinition.findMany({
     where: { isActive: true },
-  });
+  })) as Array<{
+    id: string;
+    name: string;
+    category: string;
+    triggers: unknown;
+    effects: unknown;
+    duration: number;
+  }>;
 
   // Get already active events for this session (to avoid duplicate triggers)
-  const activeEvents = await prisma.eventInstance.findMany({
+  const activeEvents = (await db.eventInstance.findMany({
     where: {
       sessionId,
       remainingDuration: { gt: 0 },
     },
     select: { definitionId: true },
-  });
+  })) as Array<{ definitionId: string }>;
   const activeEventIds = new Set(activeEvents.map((e) => e.definitionId));
 
   const triggeredEvents: TriggeredEvent[] = [];
@@ -178,23 +204,26 @@ export async function processSessionEvents(
   sessionId: string,
   snapshotId: string,
   stats: NationStats,
-  turn: number
+  turn: number,
+  client?: EventDbClient
 ): Promise<{
   triggeredEvents: TriggeredEvent[];
   newStats: NationStats;
   eventInstances: { id: string; name: string; duration: number }[];
 }> {
+  const db = getDb(client);
+
   // Find triggered events
-  const triggeredEvents = await findTriggeredEvents(sessionId, stats, turn);
+  const triggeredEvents = await findTriggeredEvents(sessionId, stats, turn, db);
 
   // Apply event effects
-  const { newStats, totalEffects } = applyEventEffects(stats, triggeredEvents);
+  const { newStats } = applyEventEffects(stats, triggeredEvents);
 
   // Create event instances in database
   const eventInstances: { id: string; name: string; duration: number }[] = [];
 
   for (const event of triggeredEvents) {
-    const instance = await prisma.eventInstance.create({
+    const instance = (await db.eventInstance.create({
       data: {
         definitionId: event.definition.id,
         snapshotId,
@@ -203,7 +232,7 @@ export async function processSessionEvents(
         appliedEffects: event.appliedEffects as unknown as Prisma.InputJsonValue,
         remainingDuration: event.definition.duration,
       },
-    });
+    })) as { id: string };
 
     eventInstances.push({
       id: instance.id,
@@ -212,11 +241,12 @@ export async function processSessionEvents(
     });
   }
 
-  // Update remaining duration for existing events
-  await prisma.eventInstance.updateMany({
+  // Update remaining duration for existing events (only those created BEFORE this turn)
+  await db.eventInstance.updateMany({
     where: {
       sessionId,
       remainingDuration: { gt: 0 },
+      turnNumber: { lt: turn }, // Don't decrement newly created events
     },
     data: {
       remainingDuration: { decrement: 1 },
@@ -233,7 +263,10 @@ export async function processSessionEvents(
 /**
  * Get active events for a session
  */
-export async function getActiveEvents(sessionId: string): Promise<
+export async function getActiveEvents(
+  sessionId: string,
+  client?: EventDbClient
+): Promise<
   {
     id: string;
     name: string;
@@ -242,7 +275,9 @@ export async function getActiveEvents(sessionId: string): Promise<
     effects: EventEffect[];
   }[]
 > {
-  const activeEvents = await prisma.eventInstance.findMany({
+  const db = getDb(client);
+
+  const activeEvents = (await db.eventInstance.findMany({
     where: {
       sessionId,
       remainingDuration: { gt: 0 },
@@ -250,7 +285,12 @@ export async function getActiveEvents(sessionId: string): Promise<
     include: {
       definition: true,
     },
-  });
+  })) as Array<{
+    id: string;
+    remainingDuration: number;
+    appliedEffects: unknown;
+    definition: { name: string; category: string };
+  }>;
 
   return activeEvents.map((event) => ({
     id: event.id,

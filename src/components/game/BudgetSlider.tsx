@@ -3,12 +3,19 @@
 import { Budget } from '@/types/game';
 import { useGameStore } from '@/stores/gameStore';
 
-const BUDGET_CONFIG = {
-  economy: { label: '경제', icon: '💰', color: 'bg-yellow-500' },
-  welfare: { label: '복지', icon: '🏥', color: 'bg-green-500' },
-  research: { label: '연구', icon: '🔬', color: 'bg-blue-500' },
-  military: { label: '군사', icon: '⚔️', color: 'bg-red-500' },
-  diplomacy: { label: '외교', icon: '🤝', color: 'bg-purple-500' },
+type BudgetConfig = {
+  label: string;
+  icon: string;
+  colorClass: string;
+  colorHex: string;
+};
+
+const BUDGET_CONFIG: Record<keyof Budget, BudgetConfig> = {
+  economy: { label: '경제', icon: '💰', colorClass: 'bg-yellow-500', colorHex: '#eab308' },
+  welfare: { label: '복지', icon: '🏥', colorClass: 'bg-green-500', colorHex: '#22c55e' },
+  research: { label: '연구', icon: '🔬', colorClass: 'bg-blue-500', colorHex: '#3b82f6' },
+  military: { label: '군사', icon: '⚔️', colorClass: 'bg-red-500', colorHex: '#ef4444' },
+  diplomacy: { label: '외교', icon: '🤝', colorClass: 'bg-purple-500', colorHex: '#a855f7' },
 };
 
 interface BudgetSliderProps {
@@ -45,17 +52,13 @@ export function BudgetSlider({ disabled = false }: BudgetSliderProps) {
                 min="0"
                 max="100"
                 value={budget[category]}
-                onChange={(e) => updateBudgetCategory(category, parseInt(e.target.value))}
+                onChange={(e) => updateBudgetCategory(category, parseInt(e.target.value, 10))}
                 disabled={disabled}
                 className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${
                   disabled ? 'opacity-50' : ''
                 }`}
                 style={{
-                  background: `linear-gradient(to right, ${
-                    config.color.replace('bg-', '')
-                  } 0%, ${config.color.replace('bg-', '')} ${budget[category]}%, #e5e7eb ${
-                    budget[category]
-                  }%, #e5e7eb 100%)`,
+                  background: `linear-gradient(to right, ${config.colorHex} 0%, ${config.colorHex} ${budget[category]}%, #e5e7eb ${budget[category]}%, #e5e7eb 100%)`,
                 }}
               />
             </div>
@@ -70,7 +73,7 @@ export function BudgetSlider({ disabled = false }: BudgetSliderProps) {
           return (
             <div
               key={category}
-              className={`${config.color} transition-all duration-200`}
+              className={`${config.colorClass} transition-all duration-200`}
               style={{ width: `${budget[category]}%` }}
               title={`${config.label}: ${budget[category]}%`}
             />
